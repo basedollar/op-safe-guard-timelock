@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { formatEther, getAddress, isAddress, type Address, type Hex } from 'viem'
+import { formatEther, getAddress, isAddress, type Address } from 'viem'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { supportedChains, type SupportedChainId } from './config'
 import TransactionPanel from './TransactionPanel'
@@ -83,7 +83,13 @@ function WalletButton({ selectedChainId }: { selectedChainId: SupportedChainId }
   )
 }
 
-function PendingCard({ transaction, onCancel }: { transaction: ScheduledTransaction; onCancel: (hash: Hex) => void }) {
+function PendingCard({
+  transaction,
+  onCancel,
+}: {
+  transaction: ScheduledTransaction
+  onCancel: (transaction: ScheduledTransaction) => void
+}) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 15_000)
@@ -116,7 +122,7 @@ function PendingCard({ transaction, onCancel }: { transaction: ScheduledTransact
           <dd>{transaction.params.operation === 0 ? 'Call' : 'DelegateCall'}</dd>
         </div>
       </dl>
-      <button className="secondary-button" onClick={() => onCancel(transaction.txHash)}>
+      <button className="secondary-button" onClick={() => onCancel(transaction)}>
         Prepare cancellation
       </button>
     </article>
@@ -128,7 +134,7 @@ export default function App() {
   const [safeAddress, setSafeAddress] = useState<Address | undefined>(initialSafeAddress)
   const [safeDraft, setSafeDraft] = useState(safeAddress ?? '')
   const [safeError, setSafeError] = useState<string>()
-  const [cancelHash, setCancelHash] = useState<Hex>()
+  const [cancelTransaction, setCancelTransaction] = useState<ScheduledTransaction>()
   const { snapshot, loading, error, refresh } = useGuardSnapshot(safeAddress, selectedChainId)
 
   const selectedChain = useMemo(
@@ -160,8 +166,8 @@ export default function App() {
     setSelectedChainId(chainId)
   }
 
-  function prepareCancellation(hash: Hex) {
-    setCancelHash(hash)
+  function prepareCancellation(transaction: ScheduledTransaction) {
+    setCancelTransaction(transaction)
     window.requestAnimationFrame(() => {
       document.getElementById('transaction-panel')?.scrollIntoView({ behavior: 'smooth' })
     })
@@ -292,11 +298,12 @@ export default function App() {
             </section>
 
             <TransactionPanel
-              key={cancelHash ?? 'transaction-panel'}
+              key={cancelTransaction?.txHash ?? 'transaction-panel'}
               safeAddress={safeAddress}
               chainId={selectedChainId}
               snapshot={snapshot}
-              cancelHash={cancelHash}
+              cancelHash={cancelTransaction?.txHash}
+              cancelNonce={cancelTransaction?.nonce}
               onComplete={refresh}
             />
           </>

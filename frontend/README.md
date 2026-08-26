@@ -18,6 +18,8 @@ RPC. To use a dedicated RPC, replace the corresponding `http()` transport in `sr
 
 - Read the guard directly from the Safe guard storage slot.
 - Display timelock delay, Safe nonce, cancellation thresholds, and pending transactions.
+- Sign the exact Safe EIP-712 cancellation payload with a connected Safe owner and add the
+  address-sorted signature to the cancellation form.
 - Submit `scheduleTransaction`, `cancelTransaction`, and the dummy `signCancellation` call.
 - Encode `configureTimelockGuard` and `clearTimelockGuard` for execution through the Safe.
 

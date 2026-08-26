@@ -1,15 +1,20 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
   BaseError,
+  concatHex,
   encodeFunctionData,
   getAddress,
+  hashTypedData,
   isAddress,
   isHex,
+  parseSignature,
+  recoverAddress,
+  serializeSignature,
   type Address,
   type Hex,
 } from 'viem'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
-import { timelockGuardAbi, ZERO_ADDRESS } from './abi'
+import { safeAbi, timelockGuardAbi, ZERO_ADDRESS } from './abi'
 import type { SupportedChainId } from './config'
 import type { ActionName, GuardSnapshot } from './types'
 
@@ -18,8 +23,24 @@ type Props = {
   chainId: SupportedChainId
   snapshot: GuardSnapshot
   cancelHash?: Hex
+  cancelNonce?: bigint
   onComplete: () => void
 }
+
+const safeTxTypes = {
+  SafeTx: [
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'data', type: 'bytes' },
+    { name: 'operation', type: 'uint8' },
+    { name: 'safeTxGas', type: 'uint256' },
+    { name: 'baseGas', type: 'uint256' },
+    { name: 'gasPrice', type: 'uint256' },
+    { name: 'gasToken', type: 'address' },
+    { name: 'refundReceiver', type: 'address' },
+    { name: 'nonce', type: 'uint256' },
+  ],
+} as const
 
 const actionLabels: Record<ActionName, string> = {
   schedule: 'Schedule transaction',
@@ -75,6 +96,7 @@ export default function TransactionPanel({
   chainId,
   snapshot,
   cancelHash,
+  cancelNonce,
   onComplete,
 }: Props) {
   const { address: walletAddress, chainId: walletChainId, isConnected } = useAccount()
@@ -98,12 +120,97 @@ export default function TransactionPanel({
   const [status, setStatus] = useState<string>()
   const [error, setError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
+  const [signing, setSigning] = useState(false)
 
   const requiresSafeCaller = safeOnlyActions.has(action)
   const walletRepresentsSafe = walletAddress?.toLowerCase() === safeAddress.toLowerCase()
   const resolvedGuardTarget = guardTarget || snapshot.guardAddress || ''
-  const resolvedNonce = nonce || snapshot.safeNonce?.toString() || '0'
+  const resolvedNonce =
+    nonce || (action === 'cancel' ? cancelNonce?.toString() : undefined) || snapshot.safeNonce?.toString() || '0'
   const activeGuardAddress = isAddress(resolvedGuardTarget) ? getAddress(resolvedGuardTarget) : undefined
+
+  function cancellationTypedData() {
+    if (!activeGuardAddress) throw new Error('Enter a valid TimelockGuard contract address.')
+    if (!isHex(txHash) || txHash.length !== 66) throw new Error('Transaction hash must be 32 bytes.')
+
+    return {
+      domain: { chainId, verifyingContract: safeAddress },
+      types: safeTxTypes,
+      primaryType: 'SafeTx' as const,
+      message: {
+        to: activeGuardAddress,
+        value: 0n,
+        data: encodeFunctionData({
+          abi: timelockGuardAbi,
+          functionName: 'signCancellation',
+          args: [txHash],
+        }),
+        operation: 0,
+        safeTxGas: 0n,
+        baseGas: 0n,
+        gasPrice: 0n,
+        gasToken: ZERO_ADDRESS,
+        refundReceiver: ZERO_ADDRESS,
+        nonce: parseUint(resolvedNonce, 'Cancellation nonce'),
+      },
+    }
+  }
+
+  async function signCancellation() {
+    setError(undefined)
+    setStatus(undefined)
+
+    try {
+      if (!walletAddress || !walletClient || !publicClient) throw new Error('Connect a wallet first.')
+      if (walletChainId !== chainId) throw new Error('Switch your wallet to the selected network.')
+
+      const isOwner = await publicClient.readContract({
+        address: safeAddress,
+        abi: safeAbi,
+        functionName: 'isOwner',
+        args: [walletAddress],
+      })
+      if (!isOwner) throw new Error('The connected wallet is not an owner of this Safe.')
+
+      const typedData = cancellationTypedData()
+      setSigning(true)
+      setStatus('Confirm the cancellation signature in your wallet…')
+      const walletSignature = await walletClient.signTypedData({ account: walletAddress, ...typedData })
+      const parsed = parseSignature(walletSignature)
+      const normalizedSignature = serializeSignature({ ...parsed, v: BigInt(27 + parsed.yParity) })
+
+      const existing = parseBytes(signatures, 'Cancellation signatures')
+      if ((existing.length - 2) % 130 !== 0) {
+        throw new Error('Existing signatures are not plain 65-byte EOA signatures and cannot be merged automatically.')
+      }
+
+      const digest = hashTypedData(typedData)
+      const signaturesByOwner = new Map<string, Hex>()
+      for (let offset = 2; offset < existing.length; offset += 130) {
+        const signature = `0x${existing.slice(offset, offset + 130)}` as Hex
+        const owner = await recoverAddress({ hash: digest, signature })
+        signaturesByOwner.set(owner.toLowerCase(), signature)
+      }
+      signaturesByOwner.set(walletAddress.toLowerCase(), normalizedSignature)
+
+      const ordered = [...signaturesByOwner.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, signature]) => signature)
+      setSignatures(concatHex(ordered))
+
+      const threshold = snapshot.cancellationThreshold
+      setStatus(
+        threshold === undefined
+          ? `Added signature from ${walletAddress}.`
+          : `Added signature ${ordered.length}/${threshold.toString()} from ${walletAddress}.`,
+      )
+    } catch (reason) {
+      setError(shortError(reason))
+      setStatus(undefined)
+    } finally {
+      setSigning(false)
+    }
+  }
 
   const buildCalldata = useMemo(() => {
     return () => {
@@ -313,7 +420,16 @@ export default function TransactionPanel({
                   label="Cancellation signatures"
                   value={signatures}
                   onChange={(event) => setSignatures(event.target.value)}
+                  hint={`Safe EIP-712 signatures, sorted by owner address. Current threshold: ${snapshot.cancellationThreshold?.toString() ?? 'unknown'}.`}
                 />
+                <button
+                  className="secondary-button sign-button"
+                  type="button"
+                  disabled={!isConnected || signing}
+                  onClick={() => void signCancellation()}
+                >
+                  {signing ? 'Signing…' : 'Sign cancellation and add to form'}
+                </button>
               </>
             )}
           </div>
