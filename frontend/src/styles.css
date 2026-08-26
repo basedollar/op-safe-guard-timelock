@@ -149,6 +149,7 @@ textarea { min-height: 104px; resize: vertical; font: 12px/1.55 'DM Mono'; }
 .calldata-box code { color: #b5beaF; overflow-wrap: anywhere; max-height: 120px; overflow-y: auto; font: 11px/1.6 'DM Mono'; }
 .calldata-box .text-button { justify-self: start; }
 .transaction-panel form > .primary-button { width: 100%; margin-top: 4px; }
+.sign-button { grid-column: 1 / -1; justify-self: start; margin: -4px 0 18px; }
 
 .notice { padding: 13px 15px; border-left: 3px solid; margin: 14px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .notice.warning { color: #ffd2bd; background: rgba(255,143,92,0.08); border-color: var(--orange); }

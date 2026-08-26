@@ -128,6 +128,13 @@ export const timelockGuardAbi = [
 export const safeAbi = [
   {
     type: 'function',
+    name: 'isOwner',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
     name: 'getStorageAt',
     stateMutability: 'view',
     inputs: [
@@ -144,4 +151,3 @@ export const safeAbi = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const
-
