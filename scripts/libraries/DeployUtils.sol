@@ -22,7 +22,7 @@ import { IReinitializableBase } from "interfaces/universal/IReinitializableBase.
 library DeployUtils {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    bytes32 internal constant DEFAULT_SALT = keccak256("op-stack-contract-impls-salt-v0");
+    bytes32 internal constant DEFAULT_SALT = keccak256("basedollar");
 
     /// @notice Returns the creation bytecode for a contract from the default compiler profile's artifact.
     ///         When `additional_compiler_profiles` is configured in foundry.toml, a contract may be compiled
